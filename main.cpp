@@ -9,11 +9,12 @@
 #include <iostream>
 #include "av_subtitles.hpp"
 
+// 使用字幕插件示例.
 int main(int argc, char** argv)
 {
 	if (argc != 5)
 	{
-		std::cout << "usage: " << argv[0] 
+		std::cout << "usage: " << argv[0]
 		<< "<subtilte/video> <time> <video_width> <video_frame>" << std::endl;
 	}
 
