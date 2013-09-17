@@ -24,6 +24,9 @@
 #pragma comment(lib, "libgcc.a")
 #pragma comment(lib, "ws2_32.lib")
 
+#define strcasecmp lstrcmpiA
+
+#endif // _MSC_VER
 
 static void write_png(char *fname, char* buffer, int width, int height, int pb)
 {
@@ -68,11 +71,6 @@ static void write_png(char *fname, char* buffer, int width, int height, int pb)
 
     fclose(fp);
 }
-
-
-#define strcasecmp lstrcmpiA
-
-#endif // _MSC_VER
 
 #define IO_BUFFER_SIZE	32768
 
