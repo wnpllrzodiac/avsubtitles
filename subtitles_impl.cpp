@@ -28,50 +28,6 @@
 
 #endif // _MSC_VER
 
-static void write_png(char *fname, char* buffer, int width, int height, int pb)
-{
-    FILE *fp;
-    png_structp png_ptr;
-    png_infop info_ptr;
-    png_byte **row_pointers;
-    int k;
-
-    png_ptr =
-        png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    info_ptr = png_create_info_struct(png_ptr);
-    fp = NULL;
-
-    fp = fopen(fname, "wb");
-    if (fp == NULL) {
-        printf("PNG Error opening %s for writing!\n", fname);
-        return;
-    }
-
-    png_init_io(png_ptr, fp);
-    png_set_compression_level(png_ptr, 0);
-
-    png_set_IHDR(png_ptr, info_ptr, width, height,
-                 8, pb == 24 ? PNG_COLOR_TYPE_RGB : PNG_COLOR_TYPE_RGBA,
-				 PNG_INTERLACE_NONE,
-                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-
-    png_write_info(png_ptr, info_ptr);
-
-    png_set_bgr(png_ptr);
-	int stride = ((pb / 8) * width);
-    row_pointers = (png_byte **) malloc(height * sizeof(png_byte *));
-    for (k = 0; k < height; k++)
-        row_pointers[k] = (unsigned char *)buffer + stride * k;
-
-    png_write_image(png_ptr, row_pointers);
-    png_write_end(png_ptr, info_ptr);
-    png_destroy_write_struct(&png_ptr, &info_ptr);
-
-    free(row_pointers);
-
-    fclose(fp);
-}
-
 #define IO_BUFFER_SIZE	32768
 
 #define _A(c)  ((c)>>24)
