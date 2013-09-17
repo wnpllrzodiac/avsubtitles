@@ -684,14 +684,20 @@ void subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 {
 	// 跳转到指定时间开始读取字幕.
 	int64_t time = (int64_t)((time_stamp / 1000.0f) * AV_TIME_BASE);
-	avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0);
-
+	if (avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0) < 0)
+		return;
 	AVPacket pkt;
 	av_init_packet(&pkt);
 	AVSubtitle sub = { 0 };
 	long long base_time;
 	long long duration;
-
+	// TODO: 缓存当前时间范围的AVSubtitleRect*或ASS_Image*, 如果在同一时间范围
+	// 可以减少渲染的可能, 从而提高性能.
+	// 需要考虑一个这样的事实:
+	// 当time_stamp向前移动时, 虽然之前的某字幕片段时间范围依然落在time_stamp, 但
+	// 也有可能有新的字幕片段同时也落在time_stamp上, 这样就需要把字幕片段的time_stamp
+	// 也一并缓冲, 并根据此来判断是否重复, 如果重复, 将继续寻找下一个字幕片段, 直到遇到
+	// 超出time_stamp所在的范围的字幕片段.
 	while (av_read_frame(m_format, &pkt) >= 0)
 	{
 		base_time = (pkt.pts * av_q2d(m_codec_ctx->time_base)) * 1000.0f;

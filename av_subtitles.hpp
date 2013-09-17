@@ -24,8 +24,8 @@ public:
 
 public:
 	// filename 打开一个字幕(或内含字幕流的视频)文件.
-	// width 指定将来渲染画面的宽.
-	// height 指定将来渲染画面的高.
+	// width 指定将来渲染画面的宽, 必须和视频原宽一至.
+	// height 指定将来渲染画面的高, 必须和视频原高一至.
 	// index 字幕流索引, 默认第1个字幕流.
 	// 打开成功返回true, 失败返回false.
 	bool open_subtilte(const std::string& filename, int width, int height, int index = 0);
