@@ -1,4 +1,5 @@
 #include <iostream>
+#include <algorithm>
 #include <assert.h>
 #include "subtitles_impl.hpp"
 
@@ -12,6 +13,7 @@
 
 #pragma comment(lib, "libass.a")
 #pragma comment(lib, "libpng16.a")
+#pragma comment(lib, "libxml2.a")
 
 #pragma comment(lib, "libiconv.a")
 #pragma comment(lib, "libfreetype.a")
@@ -406,7 +408,9 @@ void render_subtitle_frame(yuv_image& frame, ASS_Image* img)
 		++cnt;
 		img = img->next;
 	}
+#ifdef DEBUG
 	printf("%d images blended\n", cnt);
+#endif // DEBUG
 }
 
 void subtitles_impl::static_msg_callback(int level, const char* fmt, va_list va, void *data)
@@ -646,7 +650,7 @@ bool subtitles_impl::open_subtilte(const std::string& filename, int width, int h
 	if (header && header > 0)
 	{
 		// 输出字幕解码信息.
-#ifdef _DEBUG
+#ifdef DEBUG
 		std::cout.write(header, header_size);
 #endif
 		if (m_use_ass)
@@ -683,7 +687,7 @@ std::vector<std::string> subtitles_impl::subtitle_list()
 void subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 {
 	// 跳转到指定时间开始读取字幕.
-	int64_t time = (int64_t)((time_stamp / 1000.0f) * AV_TIME_BASE);
+	int64_t time = (double)time_stamp / 1000.0f * AV_TIME_BASE;
 	if (avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0) < 0)
 		return;
 	AVPacket pkt;
@@ -706,7 +710,7 @@ void subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 		if (pkt.stream_index == m_streams[m_index]->index)
 		{
 			// 不在时间范围内, 返回.
-			if (!(time >= base_time && time < base_time + duration))
+			if (!(time_stamp >= base_time && time_stamp < base_time + duration))
 				return;
 			int ret = avcodec_decode_subtitle2(m_codec_ctx, &sub, &got_subtitle, &pkt);
 			if (ret < 0)
@@ -720,7 +724,12 @@ void subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 						char *ass_line = sub.rects[i]->ass;
 						if (!ass_line)
 							break;
-						ass_process_data(m_ass_track, ass_line, strlen(ass_line));
+						if (m_expired.find(pkt.pts) == m_expired.end())
+						{
+							m_expired.insert(pkt.pts);
+							ass_process_data(m_ass_track, ass_line, strlen(ass_line));
+						}
+						base_time = base_time + duration / 2;
 						ASS_Image *img =
 							ass_render_frame(m_ass_renderer, m_ass_track, base_time, NULL);
 						yuv_image yuv_img;

@@ -14,6 +14,7 @@
 #endif // defined(_MSC_VER) && (_MSC_VER >= 1200)
 
 #include <vector>
+#include <set>
 #include <string>
 
 extern "C"
@@ -71,6 +72,9 @@ private:
 
 	// 保存字幕AVStream.
 	std::vector<AVStream*> m_streams;
+
+	// 已经被处理过的帧.
+	std::set<int64_t> m_expired;
 
 	// 数据IO上下文指针.
 	AVIOContext *m_avio_ctx;
