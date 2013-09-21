@@ -14,7 +14,7 @@
 #endif // defined(_MSC_VER) && (_MSC_VER >= 1200)
 
 #include <vector>
-#include <set>
+#include <map>
 #include <string>
 
 extern "C"
@@ -86,7 +86,7 @@ private:
 	std::vector<AVStream*> m_streams;
 
 	// 已经被处理过的帧.
-	std::set<int64_t> m_expired;
+	std::map<uint32_t, int64_t> m_expired;
 
 	// 数据IO上下文指针.
 	AVIOContext *m_avio_ctx;
