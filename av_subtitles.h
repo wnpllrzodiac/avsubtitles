@@ -46,11 +46,14 @@ EXPORT_API void free_subtitle(av_subtitle_handle handle);
 // height 指定将来渲染画面的高, 必须和视频原高一至.
 // index 字幕流索引, 默认第1个字幕流.
 // 打开成功返回0, 失败返回非0.
+// !!!注意, 首次调用open将会自动使用fontconfig缓冲字体, 缓冲估计需要几分钟,
+// 会在执行目录下创建fonts-cache的目录, 你可以在open_subtitle前手工指定
+// 字体文件调用set_font, 将禁用fontconfig, 以避免cache字体长时间阻塞.
 EXPORT_API int open_subtitle(av_subtitle_handle handle,
 	const char* filename, int width, int height, int index);
 
 // 渲染一帧字幕到YUV420图片上.
-// handle 已经分配好的av_subtitle_handle.
+// handle 已经打开的av_subtitle_handle.
 // yuv420_data 指定的yuv420数据, 必须按
 //  planar YUV 4:2:0, 12bpp, (1 Cr & Cb sample per 2x2 Y samples)编码.
 //  宽和高在open_subtilte被指定.
@@ -61,6 +64,11 @@ EXPORT_API void subtitle_do(av_subtitle_handle handle,
 // 关闭字幕.
 // handle 指定被open_subtitle打开的handle.
 EXPORT_API void close_subtitle(av_subtitle_handle handle);
+
+// 指定字体文件, 在调用open_subtilte前设置.
+// handle 已经分配好的av_subtitle_handle.
+// font 为指定的字体文件完整路径.
+EXPORT_API void set_font(av_subtitle_handle handle, const char* font);
 
 #ifdef __cplusplus
 }
