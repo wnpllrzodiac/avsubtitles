@@ -489,6 +489,9 @@ subtitles_impl::subtitles_impl(void)
 	// IO缓冲指针.
 	m_io_buffer = NULL;
 
+	// 是否使用fontconfig.
+	m_used_fontconfig = true;
+
 	// 视频画面宽.
 	m_width = -1;
 
@@ -628,7 +631,10 @@ bool subtitles_impl::open_subtilte(const std::string& filename, int width, int h
 		// 如果没有字体缓存, 将更新, 第1次这里可能阻塞几分钟, 当然也可以指定不使用fontconfig,
 		// 而指定具体的字体, 这样就不会阻塞在这里, 但这里是使用fontconfig, 主要便于移植到
 		// 非windows系统.
-		ass_set_fonts(m_ass_renderer, NULL, "Arial", 1, NULL, 1);
+		if (m_used_fontconfig || m_user_font.empty())
+			ass_set_fonts(m_ass_renderer, NULL, "Arial", 1, NULL, 1);
+		else
+			ass_set_fonts(m_ass_renderer, m_user_font.c_str(), NULL, 0, NULL, 0);
 	}
 	else if (dec_desc->id == AV_CODEC_ID_DVD_SUBTITLE
 		|| dec_desc->id == AV_CODEC_ID_DVB_SUBTITLE)

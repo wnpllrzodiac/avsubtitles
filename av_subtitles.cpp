@@ -31,6 +31,11 @@ void av_subtitles::close()
 	m_impl->close();
 }
 
+void av_subtitles::set_font(const std::string& font)
+{
+	m_impl->set_font(font);
+}
+
 #include "av_subtitles.h"
 
 #ifdef __cplusplus
@@ -86,6 +91,14 @@ void close_subtitle(av_subtitle_handle handle)
 {
 	av_subtitles* h = (av_subtitles*)handle;
 	h->close();
+}
+
+// 指定字体文件, 在调用open_subtilte前设置.
+// font 为指定的字体文件完整路径.
+void set_font(av_subtitle_handle handle, const char* font)
+{
+	av_subtitles* h = (av_subtitles*)handle;
+	h->set_font(font);
 }
 
 #ifdef __cplusplus

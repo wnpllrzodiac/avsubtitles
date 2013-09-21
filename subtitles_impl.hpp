@@ -54,6 +54,18 @@ public:
 	// 关闭字幕.
 	void close();
 
+	// 设置字体文件.
+	void set_font(const std::string& font)
+	{
+		if (font.empty())
+			m_used_fontconfig = true;
+		else
+		{
+			m_user_font = font;
+			m_used_fontconfig = false;
+		}
+	}
+
 private:
 	static void static_msg_callback(int level, const char* fmt, va_list va, void *data);
 	static int decode_interrupt_cb(void* ctx);
@@ -81,6 +93,12 @@ private:
 
 	// IO数据缓冲.
 	unsigned char *m_io_buffer;
+
+	// 是否使用fontconfig.
+	bool m_used_fontconfig;
+
+	// 用户指定的字体.
+	std::string m_user_font;
 
 	// 读取偏移.
 	int64_t m_offset;
