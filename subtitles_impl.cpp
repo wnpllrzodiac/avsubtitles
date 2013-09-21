@@ -99,16 +99,13 @@ static uint32_t crc32_tab[] = {
 	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
 };
 
-static
-uint32_t crc32(uint32_t crc, const void *buf, size_t size)
+inline
+uint32_t crc32(uint32_t crc, const uint8_t *buf, size_t size)
 {
-	const uint8_t *p;
-
-	p = (const uint8_t *)buf;
 	crc = crc ^ ~0U;
 
 	while (size--)
-		crc = crc32_tab[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
+		crc = crc32_tab[(crc ^ *buf++) & 0xFF] ^ (crc >> 8);
 
 	return crc ^ ~0U;
 }
@@ -788,7 +785,7 @@ void subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 							break;
 
 						len = strlen(ass_line);
-						crc = crc32(0, (const void*)ass_line, len);
+						crc = crc32(0, (const uint8_t*)ass_line, len);
 						iter = m_expired.find(crc);
 
 						if (iter == m_expired.end())
