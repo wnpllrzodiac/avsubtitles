@@ -781,6 +781,8 @@ void subtitles_impl::close()
 	m_offset = 0;
 	m_memory_ass = false;
 	m_use_ass = false;
+	m_used_fontconfig = true;
+	m_user_font = "";
 
 	if (m_subtitle_buf)
 	{
