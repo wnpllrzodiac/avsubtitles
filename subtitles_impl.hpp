@@ -17,12 +17,20 @@
 #include <map>
 #include <string>
 
+#ifdef AV_SUBTITLES_USE_THREAD
+#include <boost/thread.hpp>
+#include <boost/thread/condition.hpp>
+#include <boost/bind.hpp>
+#include <list>
+#endif
+
 extern "C"
 {
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
 #include "libavutil/avutil.h"
 #include "libavutil/mem.h"
+#include "libavutil/time.h"
 #include "enca.h"
 #include "ass.h"
 #include "png.h"
@@ -49,7 +57,7 @@ public:
 	// 渲染一帧字幕到YUV420图片上.
 	// yuv420_data 指定的yuv420数据, 必须按planar YUV 4:2:0, 12bpp, (1 Cr & Cb sample per 2x2 Y samples)编码.
 	// 时间戳, 单位ms(毫秒).
-	void subtitle_do(void* yuv420_data, long long time_stamp);
+	bool subtitle_do(void* yuv420_data, long long time_stamp);
 
 	// 关闭字幕.
 	void close();
@@ -73,6 +81,15 @@ private:
 	static int write_data(void* opaque, uint8_t* buf, int buf_size);
 	static int64_t seek_data(void* opaque, int64_t offset, int whence);
 
+	bool render_frame(void* yuv420_data, AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration);
+
+	int seek_file(int64_t& time);
+	int read_frame(AVPacket *pkt, int64_t& time);
+
+#ifdef AV_SUBTITLES_USE_THREAD
+	void read_thread();
+#endif
+
 private:
 	// 用于打开字幕文件, 无论是ass/ssa/srt/dvdsub格
 	// 式, 均使用AVFormatContext此打开, 这样在后面可
@@ -94,6 +111,16 @@ private:
 	// IO数据缓冲.
 	unsigned char *m_io_buffer;
 
+#ifdef AV_SUBTITLES_USE_THREAD
+	bool m_abort;
+	boost::thread m_thread;
+	std::list<AVPacket> m_queue;
+	boost::condition m_cond;
+	boost::mutex m_mutex;
+#endif
+
+	std::map<int64_t, AVPacket> m_cached;
+
 	// 是否使用fontconfig.
 	bool m_used_fontconfig;
 
@@ -102,6 +129,9 @@ private:
 
 	// 读取偏移.
 	int64_t m_offset;
+
+	// 字幕作用域.
+	std::map<int64_t, int64_t> m_range;
 
 	// 视频画面宽.
 	int m_width;

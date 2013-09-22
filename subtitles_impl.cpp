@@ -30,6 +30,10 @@
 
 #endif // _MSC_VER
 
+#ifdef AV_SUBTITLES_USE_THREAD
+# define MAX_QUEUE_SIZE 12
+#endif
+
 #define IO_BUFFER_SIZE	32768
 
 #define _A(c)  ((c)>>24)
@@ -99,8 +103,8 @@ static uint32_t crc32_tab[] = {
 	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
 };
 
-inline
-uint32_t crc32(uint32_t crc, const uint8_t *buf, size_t size)
+static
+inline uint32_t crc32(uint32_t crc, const uint8_t *buf, size_t size)
 {
 	crc = crc ^ ~0U;
 
@@ -161,7 +165,7 @@ void write_png(char *fname, char* buffer, int width, int height, int ppb)
 }
 
 static
-void blend_subrect_yuv420(yuv_image& dest, const AVSubtitleRect *rect)
+inline void blend_subrect_yuv420(yuv_image& dest, const AVSubtitleRect *rect)
 {
 	uint32_t *pal;
 	uint8_t *dsty, *dstu, *dstv;
@@ -192,11 +196,11 @@ void blend_subrect_yuv420(yuv_image& dest, const AVSubtitleRect *rect)
 		for (int j = 0; j < rect->w; j++)
 		{
 			uint32_t color = pal[*(src2++)];
+			unsigned opacity = _A(color);
+			if (!opacity) continue;
 			unsigned char cy = abgr2y(color);
 			unsigned char cu = abgr2u(color);
 			unsigned char cv = abgr2v(color);
-			unsigned opacity = _A(color);
-			if (!opacity) continue;
 			if (opacity == MAX_TRANS)
 			{
 				dsty[j] = cy;
@@ -397,7 +401,7 @@ char *read_file_recode(const char *fname, char *codepage, size_t *size)
 }
 
 static
-std::string extension(std::string const& f)
+inline std::string extension(std::string const& f)
 {
 	char const* ext = strrchr(f.c_str(), '.');
 	if (ext == 0) return "";
@@ -405,7 +409,7 @@ std::string extension(std::string const& f)
 }
 
 static
-void blend_single(yuv_image& frame, ASS_Image* img)
+inline void blend_single(yuv_image& frame, ASS_Image* img)
 {
 	unsigned char cy = rgba2y(img->color);
 	unsigned char cu = rgba2u(img->color);
@@ -457,7 +461,7 @@ void blend_single(yuv_image& frame, ASS_Image* img)
 }
 
 static
-void render_subtitle_frame(yuv_image& frame, ASS_Image* img)
+inline void render_subtitle_frame(yuv_image& frame, ASS_Image* img)
 {
 	int cnt = 0;
 	while (img) {
@@ -578,6 +582,10 @@ subtitles_impl::subtitles_impl(void)
 
 	// ass字幕track.
 	m_ass_track = NULL;
+
+#ifdef AV_SUBTITLES_USE_THREAD
+	m_abort = false;
+#endif
 
 	av_register_all();
 	avcodec_register_all();
@@ -747,94 +755,228 @@ std::vector<std::string> subtitles_impl::subtitle_list()
 	return ret;
 }
 
-void subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
+bool subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 {
 	// 跳转到指定时间开始读取字幕.
 	int64_t time = (double)time_stamp / 1000.0f * AV_TIME_BASE;
-	if (avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0) < 0)
-		return;
+	if (seek_file(time) < 0)
+		return false;
 	AVPacket pkt;
 	av_init_packet(&pkt);
 	AVSubtitle sub = { 0 };
 	long long base_time;
 	long long duration;
-	uint32_t crc = 0;
-	int len = 0;
-	std::map<uint32_t, int64_t>::iterator iter;
-	while (av_read_frame(m_format, &pkt) >= 0)
+	bool has_one = false;
+	bool use_cached = false;
+
+	for (std::map<int64_t, int64_t>::iterator finder = m_range.begin();
+		finder != m_range.end(); finder++)
 	{
-		base_time = (pkt.pts * av_q2d(m_codec_ctx->time_base)) * 1000.0f;
+		if (time_stamp >= finder->first && time_stamp < finder->second)
+			break;
+		if (time_stamp < finder->first)
+			return false;
+	}
+
+	// 循环读取packet.
+	while (true)
+	{
+		if (read_frame(&pkt, time_stamp) < 0)
+			break;
+
+		// 读取到字幕流, 计算出字幕时间和duration.
+		base_time = pkt.pts * av_q2d(m_codec_ctx->time_base) * 1000.0f;
 		duration = pkt.duration * av_q2d(m_codec_ctx->time_base) * 1000.0f;
 		int got_subtitle;
-		if (pkt.stream_index == m_streams[m_index]->index)
+		m_range[base_time] = base_time + duration;
+		// 不在时间范围内, 返回.
+		if (!(time_stamp >= base_time && time_stamp < base_time + duration))
 		{
-			// 不在时间范围内, 返回.
-			if (!(time_stamp >= base_time && time_stamp < base_time + duration))
-				return;
-			int ret = avcodec_decode_subtitle2(m_codec_ctx, &sub, &got_subtitle, &pkt);
-			if (ret < 0)
-				return;
-			else if (got_subtitle)
-			{
-				if (m_use_ass)
-				{
-					for (unsigned i = 0; i < sub.num_rects; i++)
-					{
-						char *ass_line = sub.rects[i]->ass;
-						if (!ass_line)
-							break;
-
-						len = strlen(ass_line);
-						crc = crc32(0, (const uint8_t*)ass_line, len);
-						iter = m_expired.find(crc);
-
-						if (iter == m_expired.end())
-						{
-							m_expired.insert(std::make_pair(crc, pkt.pts));
-							ass_process_data(m_ass_track, ass_line, len);
-						}
-						else
-						{
-							if (iter->second != pkt.pts)
-							{
-								m_expired.insert(std::make_pair(crc, pkt.pts));
-								ass_process_data(m_ass_track, ass_line, len);
-							}
-						}
-						base_time = base_time + duration / 2;
-						ASS_Image *img =
-							ass_render_frame(m_ass_renderer, m_ass_track, base_time, NULL);
-						yuv_image yuv_img;
-						yuv_img.width = m_width;
-						yuv_img.height = m_height;
-						yuv_img.buffer = (unsigned char *)yuv420_data;
-						render_subtitle_frame(yuv_img, img);
-					}
-				}
-				else
-				{
-					// 直接从FFmpeg渲染到YUV.
-					if (sub.format == 0)
-					{
-						for (int i = 0; i < sub.num_rects; i++)
-						{
-							AVSubtitleRect *rect = sub.rects[i];
-							if (rect->type != SUBTITLE_BITMAP)
-								continue;
-							yuv_image yuv_img;
-							yuv_img.width = m_width;
-							yuv_img.height = m_height;
-							yuv_img.buffer = (unsigned char *)yuv420_data;
-							blend_subrect_yuv420(yuv_img, rect);
-						}
-					}
-				}
-			}
+			av_free_packet(&pkt);
+			if (base_time < time_stamp)
+				continue;
+			break;
+		}
+		int ret = avcodec_decode_subtitle2(m_codec_ctx, &sub, &got_subtitle, &pkt);
+		if (ret < 0)
+			return has_one;
+		else if (got_subtitle)
+		{
+			if (render_frame(yuv420_data, sub, pkt.pts, base_time, duration))
+				has_one = true;
 		}
 		av_free_packet(&pkt);
 		avsubtitle_free(&sub);
 	}
+	return has_one;
 }
+
+bool subtitles_impl::render_frame(void* yuv420_data,
+	AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration)
+{
+	uint32_t crc = 0;
+	int len = 0;
+	bool has_one = false;
+	std::map<uint32_t, int64_t>::iterator iter;
+
+	if (m_use_ass)
+	{
+		for (unsigned i = 0; i < sub.num_rects; i++)
+		{
+			char *ass_line = sub.rects[i]->ass;
+			if (!ass_line)
+				break;
+
+			len = strlen(ass_line);
+			crc = crc32(0, (const void*)ass_line, len);
+			iter = m_expired.find(crc);
+
+			if (iter == m_expired.end())
+			{
+				m_expired.insert(std::make_pair(crc, pts));
+				ass_process_data(m_ass_track, ass_line, len);
+			}
+			else
+			{
+				if (iter->second != pts)
+				{
+					m_expired.insert(std::make_pair(crc, pts));
+					ass_process_data(m_ass_track, ass_line, len);
+				}
+			}
+			time = time + duration / 2;
+			ASS_Image *img =
+				ass_render_frame(m_ass_renderer, m_ass_track, time, NULL);
+			if (img)
+			{
+				yuv_image yuv_img;
+				yuv_img.width = m_width;
+				yuv_img.height = m_height;
+				if (img->dst_y + img->h > m_height)
+					img->dst_y = m_height - img->h;
+				if (img->dst_x + img->w > m_width)
+					img->dst_x = m_width - img->w;
+				yuv_img.buffer = (unsigned char *)yuv420_data;
+				render_subtitle_frame(yuv_img, img);
+				has_one = true;
+			}
+		}
+	}
+	else
+	{
+		// 直接从FFmpeg渲染到YUV.
+		if (sub.format == 0)
+		{
+			for (int i = 0; i < sub.num_rects; i++)
+			{
+				AVSubtitleRect *rect = sub.rects[i];
+				if (rect->type != SUBTITLE_BITMAP)
+					continue;
+				yuv_image yuv_img;
+				yuv_img.width = m_width;
+				yuv_img.height = m_height;
+				if (rect->y + rect->h > m_height)
+					rect->y = m_height - rect->h;
+				if (rect->x + rect->w > m_width)
+					rect->x = m_width - rect->w;
+				yuv_img.buffer = (unsigned char *)yuv420_data;
+				blend_subrect_yuv420(yuv_img, rect);
+			}
+			has_one = true;
+		}
+	}
+	return has_one;
+}
+
+int subtitles_impl::seek_file(int64_t& time)
+{
+#ifndef AV_SUBTITLES_USE_THREAD
+	return avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0);
+#else
+	return 0;
+#endif
+}
+
+int subtitles_impl::read_frame(AVPacket *pkt, int64_t& time)
+{
+#ifndef AV_SUBTITLES_USE_THREAD
+	while(true)
+	{
+		int ret = av_read_frame(m_format, pkt);
+		if (ret == AVERROR(EAGAIN))
+		{
+			av_usleep(10000);
+			continue;
+		}
+		if (pkt->stream_index != m_streams[m_index]->index)
+		{
+			av_free_packet(pkt);
+			continue;
+		}
+		return ret;
+	}
+#else
+	if (m_queue.size() > 0)
+	{
+		*pkt = m_queue.front();
+		m_queue.pop_front();
+	}
+#endif
+	return 0;
+}
+
+#ifdef AV_SUBTITLES_USE_THREAD
+
+void subtitles_impl::read_thread()
+{
+	AVPacket pkt;
+	int ret = 0;
+	av_init_packet(&pkt);
+
+	while (!m_abort)
+	{
+		ret = av_read_frame(m_format, &pkt);
+		if (ret == AVERROR(EAGAIN))
+		{
+			av_usleep(10000);
+			continue;
+		}
+		if (ret < 0)
+		{
+			av_usleep(10000);
+			continue;
+		}
+
+		// 不是我们需要的流, 跳过.
+		if (pkt.stream_index != m_streams[m_index]->index)
+			continue;
+
+		long long current_time = pkt.pts * av_q2d(m_codec_ctx->time_base) * 1000.0f;
+		long long duration = pkt.duration * av_q2d(m_codec_ctx->time_base) * 1000.0f;
+
+		// 添加到队列.
+		{
+			boost::mutex::scoped_lock l(m_mutex);
+			do
+			{
+				if (m_queue.size() >= MAX_QUEUE_SIZE)
+				{
+					l.unlock();	// 暂时解锁, 以便工作线程去拿队列中的packet.
+					av_usleep(10000);
+					l.lock();	// 再锁上.
+				}
+				else
+				{
+					break;
+				}
+			} while (!m_abort);
+			m_queue.push_back(pkt);
+			m_cond.notify_one();
+		}
+	}
+}
+
+#endif
 
 void subtitles_impl::close()
 {
@@ -856,6 +998,13 @@ void subtitles_impl::close()
 	m_use_ass = false;
 	m_used_fontconfig = true;
 	m_user_font = "";
+
+	for (std::map<int64_t, AVPacket>::iterator iter = m_cached.begin();
+		iter != m_cached.end(); iter++)
+	{
+		av_free_packet(&iter->second);
+	}
+	m_cached.clear();
 
 	if (m_subtitle_buf)
 	{

@@ -21,7 +21,7 @@ std::vector<std::string> av_subtitles::subtitle_list()
 	return m_impl->subtitle_list();
 }
 
-void av_subtitles::subtitle_do(void* yuv420_data, long long time_stamp)
+bool av_subtitles::subtitle_do(void* yuv420_data, long long time_stamp)
 {
 	return m_impl->subtitle_do(yuv420_data, time_stamp);
 }

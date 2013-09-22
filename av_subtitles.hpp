@@ -39,7 +39,7 @@ public:
 	// 渲染一帧字幕到YUV420图片上.
 	// yuv420_data 指定的yuv420数据, 必须按planar YUV 4:2:0, 12bpp, (1 Cr & Cb sample per 2x2 Y samples)编码.
 	// 时间戳, 单位ms(毫秒).
-	void subtitle_do(void* yuv420_data, long long time_stamp);
+	bool subtitle_do(void* yuv420_data, long long time_stamp);
 
 	// 关闭字幕.
 	void close();
