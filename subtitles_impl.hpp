@@ -81,7 +81,7 @@ private:
 	static int write_data(void* opaque, uint8_t* buf, int buf_size);
 	static int64_t seek_data(void* opaque, int64_t offset, int whence);
 
-	bool render_frame(void* yuv420_data, AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration);
+	inline bool render_frame(void* yuv420_data, AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration);
 
 	int seek_file(int64_t& time);
 	int read_frame(AVPacket *pkt, int64_t& time);
@@ -114,11 +114,11 @@ private:
 #ifdef AV_SUBTITLES_USE_THREAD
 	bool m_abort;
 	boost::thread m_thread;
-	std::list<AVPacket> m_queue;
-	boost::condition m_cond;
 	boost::mutex m_mutex;
+	bool m_req_seek;
 #endif
 
+	int64_t m_seek_point;
 	std::map<int64_t, AVPacket> m_cached;
 
 	// 是否使用fontconfig.
@@ -129,9 +129,6 @@ private:
 
 	// 读取偏移.
 	int64_t m_offset;
-
-	// 字幕作用域.
-	std::map<int64_t, int64_t> m_range;
 
 	// 视频画面宽.
 	int m_width;

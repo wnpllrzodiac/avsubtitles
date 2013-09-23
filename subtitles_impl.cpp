@@ -30,9 +30,7 @@
 
 #endif // _MSC_VER
 
-#ifdef AV_SUBTITLES_USE_THREAD
-# define MAX_QUEUE_SIZE 12
-#endif
+#define MAX_LOOKUP_SIZE	32
 
 #define IO_BUFFER_SIZE	32768
 
@@ -479,10 +477,12 @@ void subtitles_impl::static_msg_callback(int level, const char* fmt, va_list va,
 	subtitles_impl* this_ = (subtitles_impl*)data;
 	if (level > 6)
 		return;
+#ifdef DEBUG
 	char buffer[4096] = { 0 };
 	vsprintf(buffer, fmt, va);
 	std::string msg = "ass: " + std::string(buffer) + "\n";
 	std::cout << msg;
+#endif // DEBUG
 }
 
 int subtitles_impl::decode_interrupt_cb(void *ctx)
@@ -736,6 +736,13 @@ bool subtitles_impl::open_subtilte(const std::string& filename, int width, int h
 		return false;
 	}
 
+	m_seek_point = -1;
+#ifdef AV_SUBTITLES_USE_THREAD
+	m_req_seek = false;
+	m_abort = false;
+	m_thread = boost::thread(boost::bind(&subtitles_impl::read_thread, this));
+#endif
+
 	return true;
 }
 
@@ -761,6 +768,7 @@ bool subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 	int64_t time = (double)time_stamp / 1000.0f * AV_TIME_BASE;
 	if (seek_file(time) < 0)
 		return false;
+
 	AVPacket pkt;
 	av_init_packet(&pkt);
 	AVSubtitle sub = { 0 };
@@ -768,15 +776,6 @@ bool subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 	long long duration;
 	bool has_one = false;
 	bool use_cached = false;
-
-	for (std::map<int64_t, int64_t>::iterator finder = m_range.begin();
-		finder != m_range.end(); finder++)
-	{
-		if (time_stamp >= finder->first && time_stamp < finder->second)
-			break;
-		if (time_stamp < finder->first)
-			return false;
-	}
 
 	// 循环读取packet.
 	while (true)
@@ -788,7 +787,6 @@ bool subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 		base_time = pkt.pts * av_q2d(m_codec_ctx->time_base) * 1000.0f;
 		duration = pkt.duration * av_q2d(m_codec_ctx->time_base) * 1000.0f;
 		int got_subtitle;
-		m_range[base_time] = base_time + duration;
 		// 不在时间范围内, 返回.
 		if (!(time_stamp >= base_time && time_stamp < base_time + duration))
 		{
@@ -807,11 +805,14 @@ bool subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 		}
 		av_free_packet(&pkt);
 		avsubtitle_free(&sub);
+		// 只有外挂的字幕时, 才允许多次搜索, 因为内置不需要.
+		if (!m_memory_ass)
+			break;
 	}
 	return has_one;
 }
 
-bool subtitles_impl::render_frame(void* yuv420_data,
+inline bool subtitles_impl::render_frame(void* yuv420_data,
 	AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration)
 {
 	uint32_t crc = 0;
@@ -891,8 +892,19 @@ bool subtitles_impl::render_frame(void* yuv420_data,
 int subtitles_impl::seek_file(int64_t& time)
 {
 #ifndef AV_SUBTITLES_USE_THREAD
-	return avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0);
+	if (FFABS(time - m_seek_point) > 5000000)
+	{
+		m_seek_point = time;
+		return avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0);
+	}
+	return 0;
 #else
+	{
+		boost::mutex::scoped_lock l(m_mutex);
+		if (FFABS(time - m_seek_point) > 5000000)
+			m_req_seek = true;
+		m_seek_point = time;
+	}
 	return 0;
 #endif
 }
@@ -900,6 +912,25 @@ int subtitles_impl::seek_file(int64_t& time)
 int subtitles_impl::read_frame(AVPacket *pkt, int64_t& time)
 {
 #ifndef AV_SUBTITLES_USE_THREAD
+	int lookup = 0;
+	AVPacket temp;
+	if (m_cached.size() != 0)
+	{
+		std::map<int64_t, AVPacket>::iterator iter = m_cached.begin();
+		for (; iter != m_cached.end(); iter++)
+		{
+			AVPacket& tmp = iter->second;
+			int64_t begin_time = tmp.pts * av_q2d(m_codec_ctx->time_base) * 1000.0f;
+			int64_t end_time = begin_time + (tmp.duration * av_q2d(m_codec_ctx->time_base) * 1000.0f);
+
+			if (time >= begin_time && time < end_time)
+			{
+				av_copy_packet(pkt, &tmp);
+				return 0;
+			}
+		}
+	}
+
 	while(true)
 	{
 		int ret = av_read_frame(m_format, pkt);
@@ -911,18 +942,39 @@ int subtitles_impl::read_frame(AVPacket *pkt, int64_t& time)
 		if (pkt->stream_index != m_streams[m_index]->index)
 		{
 			av_free_packet(pkt);
-			continue;
+			if (++lookup < MAX_LOOKUP_SIZE)
+				continue;
+			break;
 		}
+		if (m_cached.find(pkt->pts) == m_cached.end())
+		{
+			AVPacket tmp;
+			av_copy_packet(&tmp, pkt);
+			m_cached.insert(std::make_pair(pkt->pts, tmp));
+		}
+
 		return ret;
 	}
 #else
-	if (m_queue.size() > 0)
+	boost::mutex::scoped_lock l(m_mutex);
+	if (m_cached.size() != 0)
 	{
-		*pkt = m_queue.front();
-		m_queue.pop_front();
+		std::map<int64_t, AVPacket>::iterator iter = m_cached.begin();
+		for (; iter != m_cached.end(); iter++)
+		{
+			AVPacket& tmp = iter->second;
+			int64_t begin_time = tmp.pts * av_q2d(m_codec_ctx->time_base) * 1000.0f;
+			int64_t end_time = begin_time + (tmp.duration * av_q2d(m_codec_ctx->time_base) * 1000.0f);
+
+			if (time >= begin_time && time < end_time)
+			{
+				av_copy_packet(pkt, &tmp);
+				return 0;
+			}
+		}
 	}
 #endif
-	return 0;
+	return -1;
 }
 
 #ifdef AV_SUBTITLES_USE_THREAD
@@ -935,6 +987,15 @@ void subtitles_impl::read_thread()
 
 	while (!m_abort)
 	{
+		{
+			boost::mutex::scoped_lock l(m_mutex);
+			if (m_req_seek)
+			{
+				m_req_seek = false;
+				avformat_seek_file(m_format, -1, INT64_MIN, m_seek_point, INT64_MAX, 0);
+			}
+		}
+
 		ret = av_read_frame(m_format, &pkt);
 		if (ret == AVERROR(EAGAIN))
 		{
@@ -949,29 +1010,20 @@ void subtitles_impl::read_thread()
 
 		// 不是我们需要的流, 跳过.
 		if (pkt.stream_index != m_streams[m_index]->index)
+		{
+			av_free_packet(&pkt);
 			continue;
+		}
 
-		long long current_time = pkt.pts * av_q2d(m_codec_ctx->time_base) * 1000.0f;
-		long long duration = pkt.duration * av_q2d(m_codec_ctx->time_base) * 1000.0f;
+		av_usleep(10000);
 
 		// 添加到队列.
 		{
 			boost::mutex::scoped_lock l(m_mutex);
-			do
-			{
-				if (m_queue.size() >= MAX_QUEUE_SIZE)
-				{
-					l.unlock();	// 暂时解锁, 以便工作线程去拿队列中的packet.
-					av_usleep(10000);
-					l.lock();	// 再锁上.
-				}
-				else
-				{
-					break;
-				}
-			} while (!m_abort);
-			m_queue.push_back(pkt);
-			m_cond.notify_one();
+			if (m_cached.find(pkt.pts) == m_cached.end())
+				m_cached.insert(std::make_pair(pkt.pts, pkt));
+			else
+				av_free_packet(&pkt);
 		}
 	}
 }
@@ -980,6 +1032,14 @@ void subtitles_impl::read_thread()
 
 void subtitles_impl::close()
 {
+#ifdef AV_SUBTITLES_USE_THREAD
+	m_abort = true;
+	if (m_thread.joinable())
+	{
+		m_thread.join();
+	}
+#endif
+
 	if (m_format)
 	{
 		avformat_close_input(&m_format);
