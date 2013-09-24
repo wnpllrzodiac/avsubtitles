@@ -749,14 +749,47 @@ bool subtitles_impl::open_subtilte(const std::string& filename, int width, int h
 std::vector<std::string> subtitles_impl::subtitle_list()
 {
 	std::vector<std::string> ret;
+	std::string lang;
+	std::string title;
+	int index = 0;
+
 	if (m_codec_ctx && m_streams.size() != 0)
 	{
 		for (std::vector<AVStream*>::iterator i = m_streams.begin();
 			i != m_streams.end(); i++)
 		{
-			enum AVCodecID& id = (**i).codec->codec_id;
-			const AVCodecDescriptor* dec_desc = avcodec_descriptor_get(id);
-			ret.push_back(dec_desc->name);
+			AVStream*& st = *i;
+			AVDictionary* m = st->metadata;
+
+			lang = "";
+			title = "";
+
+			if(m && !(av_dict_count(m) == 1 && av_dict_get(m, "language", NULL, 0)))
+			{
+				AVDictionaryEntry* tag = NULL;
+				while((tag = av_dict_get(m, "", tag, AV_DICT_IGNORE_SUFFIX)))
+				{
+					if(strcmp("language", tag->key) == 0)
+						lang = tag->value;
+					else if (strcmp("title", tag->key) == 0)
+						title = tag->value;
+				}
+			}
+
+			if (lang.empty() && title.empty())
+			{
+				char buf[256] = {0};
+				sprintf(buf, "%d Subtitle", index);
+				ret.push_back(buf);
+			}
+			else
+			{
+				char buf[1024] = {0};
+				sprintf(buf, "%d %s [%s]", index, title.c_str(), lang.c_str());
+				ret.push_back(buf);
+			}
+
+			index++;
 		}
 	}
 	return ret;
