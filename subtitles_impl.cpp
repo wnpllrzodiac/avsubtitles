@@ -102,12 +102,15 @@ static uint32_t crc32_tab[] = {
 };
 
 static
-inline uint32_t crc32(uint32_t crc, const uint8_t *buf, size_t size)
+inline uint32_t crc32(uint32_t crc, const void *buf, size_t size)
 {
+	const uint8_t *p;
+
+	p = (const uint8_t *)buf;
 	crc = crc ^ ~0U;
 
 	while (size--)
-		crc = crc32_tab[(crc ^ *buf++) & 0xFF] ^ (crc >> 8);
+		crc = crc32_tab[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
 
 	return crc ^ ~0U;
 }
@@ -925,7 +928,7 @@ inline bool subtitles_impl::render_frame(void* yuv420_data,
 int subtitles_impl::seek_file(int64_t& time)
 {
 #ifndef AV_SUBTITLES_USE_THREAD
-	if (FFABS(time - m_seek_point) > 5000000)
+	if (m_memory_ass || FFABS(time - m_seek_point) > 5000000)
 	{
 		m_seek_point = time;
 		return avformat_seek_file(m_format, -1, INT64_MIN, time, INT64_MAX, 0);
@@ -947,7 +950,7 @@ int subtitles_impl::read_frame(AVPacket *pkt, int64_t& time)
 #ifndef AV_SUBTITLES_USE_THREAD
 	int lookup = 0;
 	AVPacket temp;
-	if (m_cached.size() != 0)
+	if (!m_memory_ass && m_cached.size() != 0)
 	{
 		std::map<int64_t, AVPacket>::iterator iter = m_cached.begin();
 		for (; iter != m_cached.end(); iter++)
@@ -979,7 +982,7 @@ int subtitles_impl::read_frame(AVPacket *pkt, int64_t& time)
 				continue;
 			break;
 		}
-		if (m_cached.find(pkt->pts) == m_cached.end())
+		if (!m_memory_ass && m_cached.find(pkt->pts) == m_cached.end())
 		{
 			AVPacket tmp;
 			av_copy_packet(&tmp, pkt);
