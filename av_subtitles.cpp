@@ -31,6 +31,11 @@ void av_subtitles::close()
 	m_impl->close();
 }
 
+void av_subtitles::time_offset(long long offset)
+{
+
+}
+
 void av_subtitles::set_font(const std::string& font)
 {
 	m_impl->set_font(font);
@@ -99,6 +104,14 @@ void set_font(av_subtitle_handle handle, const char* font)
 {
 	av_subtitles* h = (av_subtitles*)handle;
 	h->set_font(font);
+}
+
+// 修改时间偏移.
+// offset 表示时间偏移, +向前, -向后. 单位ms(毫秒).
+void time_offset(av_subtitle_handle handle, long long offset)
+{
+	av_subtitles* h = (av_subtitles*)handle;
+	h->time_offset(offset);
 }
 
 #ifdef __cplusplus

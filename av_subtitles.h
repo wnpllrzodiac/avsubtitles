@@ -70,6 +70,10 @@ EXPORT_API void close_subtitle(av_subtitle_handle handle);
 // font 为指定的字体文件完整路径.
 EXPORT_API void set_font(av_subtitle_handle handle, const char* font);
 
+// 修改时间偏移.
+// offset 表示时间偏移, +向前, -向后. 单位ms(毫秒).
+EXPORT_API void time_offset(av_subtitle_handle handle, long long offset);
+
 #ifdef __cplusplus
 }
 #endif

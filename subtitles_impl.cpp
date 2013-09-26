@@ -556,6 +556,12 @@ subtitles_impl::subtitles_impl(void)
 	// 是否使用fontconfig.
 	m_used_fontconfig = true;
 
+	// 时间偏移.
+	m_time_offset = 0;
+
+	// 读取偏移.
+	m_offset = 0;
+
 	// 视频画面宽.
 	m_width = -1;
 
@@ -800,6 +806,8 @@ std::vector<std::string> subtitles_impl::subtitle_list()
 
 bool subtitles_impl::subtitle_do(void* yuv420_data, long long time_stamp)
 {
+	// 偏移时间.
+	time_stamp += m_time_offset;
 	// 跳转到指定时间开始读取字幕.
 	int64_t time = (double)time_stamp / 1000.0f * AV_TIME_BASE;
 	if (seek_file(time) < 0)

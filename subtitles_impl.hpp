@@ -55,12 +55,20 @@ public:
 	std::vector<std::string> subtitle_list();
 
 	// 渲染一帧字幕到YUV420图片上.
-	// yuv420_data 指定的yuv420数据, 必须按planar YUV 4:2:0, 12bpp, (1 Cr & Cb sample per 2x2 Y samples)编码.
+	// yuv420_data 指定的yuv420数据, 必须按
+	// planar YUV 4:2:0, 12bpp, (1 Cr & Cb sample per 2x2 Y samples)编码.
 	// 时间戳, 单位ms(毫秒).
 	bool subtitle_do(void* yuv420_data, long long time_stamp);
 
 	// 关闭字幕.
 	void close();
+
+	// 修改时间偏移.
+	// offset 表示时间偏移, +向前, -向后. 单位ms(毫秒).
+	void time_offset(long long offset)
+	{
+		m_time_offset = offset;
+	}
 
 	// 设置字体文件.
 	void set_font(const std::string& font)
@@ -81,7 +89,8 @@ private:
 	static int write_data(void* opaque, uint8_t* buf, int buf_size);
 	static int64_t seek_data(void* opaque, int64_t offset, int whence);
 
-	inline bool render_frame(void* yuv420_data, AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration);
+	inline bool render_frame(void* yuv420_data,
+		AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration);
 
 	int seek_file(int64_t& time);
 	int read_frame(AVPacket *pkt, int64_t& time);
@@ -126,6 +135,9 @@ private:
 
 	// 用户指定的字体.
 	std::string m_user_font;
+
+	// 时间偏移.
+	int64_t m_time_offset;
 
 	// 读取偏移.
 	int64_t m_offset;

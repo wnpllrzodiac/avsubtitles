@@ -44,6 +44,10 @@ public:
 	// 关闭字幕.
 	void close();
 
+	// 修改时间偏移.
+	// offset 表示时间偏移, +向前, -向后. 单位ms(毫秒).
+	void time_offset(long long offset);
+
 	// 指定字体文件, 在调用open_subtilte前设置.
 	// font 为指定的字体文件完整路径.
 	void set_font(const std::string& font);
