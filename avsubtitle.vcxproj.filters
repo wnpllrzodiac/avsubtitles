@@ -24,6 +24,9 @@
     <ClCompile Include="av_subtitles.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="drawutils.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="av_subtitles.hpp">
@@ -33,6 +36,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="av_subtitles.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="drawutils.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
