@@ -34,6 +34,13 @@
 
 #define IO_BUFFER_SIZE	32768
 
+
+/* libass stores an RGBA color in the format RRGGBBTT, where TT is the transparency level */
+#define AR(c)  ((c)>>24)
+#define AG(c)  (((c)>>16)&0xFF)
+#define AB(c)  (((c)>>8) &0xFF)
+#define AA(c)  ((0xFF-c) &0xFF)
+
 #define _A(c)  ((c)>>24)
 #define _B(c)  (((c)>>16)&0xFF)
 #define _G(c)  (((c)>>8)&0xFF)
@@ -102,23 +109,15 @@ static uint32_t crc32_tab[] = {
 };
 
 static
-inline uint32_t crc32(uint32_t crc, const void *buf, size_t size)
+inline uint32_t crc32(uint32_t crc, const uint8_t* buf, size_t size)
 {
-	const uint8_t *p;
-
-	p = (const uint8_t *)buf;
 	crc = crc ^ ~0U;
 
 	while (size--)
-		crc = crc32_tab[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
+		crc = crc32_tab[(crc ^ *buf++) & 0xFF] ^ (crc >> 8);
 
 	return crc ^ ~0U;
 }
-
-typedef struct yuv_image_t {
-	int width, height;
-	unsigned char *buffer;      // Yuv image
-} yuv_image;
 
 static
 void write_png(char *fname, char* buffer, int width, int height, int ppb)
@@ -461,12 +460,29 @@ inline void blend_single(yuv_image& frame, ASS_Image* img)
 	}
 }
 
-static
-inline void render_subtitle_frame(yuv_image& frame, ASS_Image* img)
+inline void subtitles_impl::render_subtitle_frame(yuv_image& frame, ASS_Image* img)
 {
+	static AVFrame avframe = { 0 };
+
+	avframe.data[0] = frame.buffer;
+	avframe.data[1] = frame.buffer + frame.width * frame.height;
+	avframe.data[2] = avframe.data[1] + (frame.width / 2) * (frame.height / 2);
+	avframe.data[3] = NULL;
+	avframe.linesize[0] = frame.width;
+	avframe.linesize[1] = frame.width / 2;
+	avframe.linesize[2] = frame.width / 2;
+	avframe.linesize[3] = 0;
+
 	int cnt = 0;
 	while (img) {
-		blend_single(frame, img);
+		uint8_t rgba_color[] = {AR(img->color), AG(img->color), AB(img->color), AA(img->color)};
+		FFDrawColor color;
+		ff_draw_color(&m_draw, &color, rgba_color);
+		ff_blend_mask(&m_draw, &color,
+			avframe.data, avframe.linesize,
+			frame.width, frame.height,
+			img->bitmap, img->stride, img->w, img->h,
+			3, 0, img->dst_x, img->dst_y);
 		++cnt;
 		img = img->next;
 	}
@@ -709,6 +725,8 @@ bool subtitles_impl::open_subtilte(const std::string& filename, int width, int h
 			ass_set_fonts(m_ass_renderer, NULL, "Arial", 1, NULL, 1);
 		else
 			ass_set_fonts(m_ass_renderer, m_user_font.c_str(), NULL, 0, NULL, 0);
+		// 渲染器初始化.
+		ff_draw_init(&m_draw, AV_PIX_FMT_YUV420P, 0);
 	}
 	else if (dec_desc->id == AV_CODEC_ID_DVD_SUBTITLE
 		|| dec_desc->id == AV_CODEC_ID_DVB_SUBTITLE)
@@ -873,7 +891,7 @@ inline bool subtitles_impl::render_frame(void* yuv420_data,
 				break;
 
 			len = strlen(ass_line);
-			crc = crc32(0, (const void*)ass_line, len);
+			crc = crc32(0, (const uint8_t*)ass_line, len);
 			iter = m_expired.find(crc);
 
 			if (iter == m_expired.end())

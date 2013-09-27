@@ -36,6 +36,12 @@ extern "C"
 #include "png.h"
 }
 #include "iconv.h"
+#include "drawutils.hpp"
+
+typedef struct yuv_image_t {
+	int width, height;
+	unsigned char *buffer;      // Yuv image
+} yuv_image;
 
 class subtitles_impl
 {
@@ -91,6 +97,7 @@ private:
 
 	inline bool render_frame(void* yuv420_data,
 		AVSubtitle& sub, int64_t& pts, int64_t& time, int64_t& duration);
+	inline void render_subtitle_frame(yuv_image& frame, ASS_Image* img);
 
 	int seek_file(int64_t& time);
 	int read_frame(AVPacket *pkt, int64_t& time);
@@ -165,6 +172,9 @@ private:
 
 	// ass handle.
 	ass_library* m_ass_library;
+
+	// 用于渲染ass字幕.
+	FFDrawContext m_draw;
 
 	// ass字幕渲染器.
 	ASS_Renderer* m_ass_renderer;
